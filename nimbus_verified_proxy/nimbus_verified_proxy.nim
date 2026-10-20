@@ -45,13 +45,17 @@ logScope:
 # without the need of exceptions
 type ProxyError = object of CatchableError
 
-func getConfiguredChainId*(chain: Option[string]): UInt256 =
+proc getConfiguredChainId*(chain: Option[string]): UInt256 =
   let net = chain.get("mainnet").toLowerAscii()
   case net
   of "mainnet": 1.u256
   of "sepolia": 11155111.u256
   of "hoodi": 560048.u256
-  else: 1.u256
+  else:
+    # A directory path (e.g. a fixturenet's testnet-dir): take the chain id
+    # from the loaded genesis config's DEPOSIT_CHAIN_ID, which the genesis
+    # generator sets equal to the execution chain id.
+    getMetadataForNetwork(chain.get("mainnet")).cfg.DEPOSIT_CHAIN_ID.u256
 
 proc startExecutionBackends(
     engine: RpcVerificationEngine, urls: seq[string], caps: BackendCapabilities
@@ -129,7 +133,7 @@ proc startP2PBeaconBackend(
 ): Future[Option[P2PLightClientBackend]] {.async: (raises: [CancelledError]).} =
   let
     networkName = config.eth2Network.get("mainnet")
-    genesis = genesisParamsForNetwork(networkName)
+    genesis = genesisParamsForNetwork(networkName, getMetadataForNetwork(networkName))
     p2pConf = P2PBackendConf(
       cfg: engine.cfg,
       forkDigests: engine.forkDigests,

@@ -5,7 +5,14 @@
 #   * Apache v2 license (license terms in the root directory or at https://www.apache.org/licenses/LICENSE-2.0).
 # at your option. This file may not be copied, modified, or distributed except according to those terms.
 
-import stew/byteutils, results, eth/common/times, beacon_chain/spec/digest
+import
+  stew/[byteutils, io2],
+  results,
+  eth/common/times,
+  beacon_chain/spec/digest,
+  beacon_chain/spec/beacon_time,
+  beacon_chain/spec/forks,
+  beacon_chain/networking/network_metadata
 
 type GenesisParams* = object
   genesisTime*: uint64
@@ -45,7 +52,20 @@ const
     )
   )
 
-func genesisParamsForNetwork*(network: string): GenesisParams {.raises: [].} =
+# Absolute unix time of the start of `epoch`, given genesis time and the
+# loaded time params. `Opt.none` when the fork is not scheduled
+# (`FAR_FUTURE_EPOCH`).
+proc forkActivationTime(
+    genesisTime: uint64, timeParams: TimeParams, epoch: Epoch
+): Opt[EthTime] =
+  if epoch == FAR_FUTURE_EPOCH:
+    return Opt.none(EthTime)
+  let ns = start_beacon_time(start_slot(epoch), timeParams).ns_since_genesis
+  Opt.some(EthTime(genesisTime.int64 + ns div 1_000_000_000))
+
+proc genesisParamsForNetwork*(
+    network: string, metadata: Eth2NetworkMetadata
+): GenesisParams {.raises: [].} =
   case network
   of "sepolia":
     GenesisParams(
@@ -61,10 +81,38 @@ func genesisParamsForNetwork*(network: string): GenesisParams {.raises: [].} =
       genesisBlockRoot: hoodiGenesisBlockRoot,
       eip2935ForkTime: Opt.some(1_742_999_832.EthTime),
     )
-  else: # mainnet
+  of "mainnet":
     GenesisParams(
       genesisTime: 1606824023'u64,
       genesisValidatorsRoot: mainnetGenesisValidatorsRoot,
       genesisBlockRoot: mainnetGenesisBlockRoot,
       eip2935ForkTime: Opt.some(1_746_612_311.EthTime),
+    )
+  else:
+    # A directory name (e.g. a fixturenet's testnet-dir): `metadata` is
+    # already loaded from its config.yaml (getMetadataForNetwork). Read the
+    # genesis state from the same directory's genesis.ssz for genesisTime and
+    # genesisValidatorsRoot. genesisBlockRoot stays zero: its only consumer is
+    # the P2P light client backend, which this proxy does not use against a
+    # beacon REST API. eip2935ForkTime comes from the loaded runtime config's
+    # Electra activation epoch (EIP-2935 ships with Prague/Electra).
+    doAssert metadata.genesis.kind == UserSuppliedFile,
+      "custom network '" & network & "' needs a genesis.ssz next to its config.yaml"
+    var raw: seq[byte]
+    io2.readFile(metadata.genesis.path, raw).isOkOr:
+      raiseAssert "cannot read genesis state '" & metadata.genesis.path & "': " &
+        error.ioErrorMsg()
+    let state =
+      try:
+        readSszForkedHashedBeaconState(metadata.cfg, raw)
+      except SerializationError as exc:
+        raiseAssert "cannot decode genesis state '" & metadata.genesis.path &
+          "': " & exc.msg
+    GenesisParams(
+      genesisTime: state.genesis_time,
+      genesisValidatorsRoot: state.genesis_validators_root,
+      genesisBlockRoot: default(Eth2Digest),
+      eip2935ForkTime: forkActivationTime(
+        state.genesis_time, metadata.cfg.timeParams, metadata.cfg.ELECTRA_FORK_EPOCH
+      ),
     )

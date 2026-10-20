@@ -43,13 +43,17 @@ proc NimMain() {.importc, exportc, dynlib.}
 
 type ProxyError = object of CatchableError
 
-func getConfiguredChainId(chain: Option[string]): UInt256 =
+proc getConfiguredChainId(chain: Option[string]): UInt256 =
   let net = chain.get("mainnet").toLowerAscii()
   case net
   of "mainnet": 1.u256
   of "sepolia": 11155111.u256
   of "hoodi": 560048.u256
-  else: 1.u256
+  else:
+    # A directory path (e.g. a fixturenet's testnet-dir): take the chain id
+    # from the loaded genesis config's DEPOSIT_CHAIN_ID, which the genesis
+    # generator sets equal to the execution chain id.
+    getMetadataForNetwork(chain.get("mainnet")).cfg.DEPOSIT_CHAIN_ID.u256
 
 proc freeNimAllocatedString(res: cstring) {.exported.} =
   deallocShared(res)

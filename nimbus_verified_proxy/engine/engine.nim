@@ -139,7 +139,7 @@ proc init*(
   let
     networkName = config.eth2Network.get("mainnet")
     metadata = getMetadataForNetwork(networkName)
-    genesis = genesisParamsForNetwork(networkName)
+    genesis = genesisParamsForNetwork(networkName, metadata)
     genesisTime = genesis.genesisTime
     genesis_validators_root = genesis.genesisValidatorsRoot
     beaconClock = BeaconClock.init(metadata.cfg.timeParams, genesisTime).valueOr:

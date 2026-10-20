@@ -17,5 +17,8 @@ func chainIdToNetworkId*(chainId: UInt256): EngineResult[UInt256] =
   elif chainId == 560048.u256: # hoodi
     ok(560048.u256)
   else:
-    # untagged(-1) so the relevant backend can be tagged
-    err((InvalidDataError, "Unknown chainId", UNTAGGED))
+    # A fixturenet or other custom network can use any chain id (operator,
+    # 2026-10-19). Outside mainnet/sepolia/hoodi's historical quirks, a
+    # network's id equals its chain id by EIP-155 convention, so treat it
+    # that way instead of failing.
+    ok(chainId)
